@@ -2,6 +2,7 @@ from lib.struct.address       import Address
 from typing        import Any, List
 from enum          import Enum
 
+import math
 import json
 import time
 import xmlrpc.client 
@@ -30,8 +31,6 @@ class RaftNode():
         self.cluster_addr_list:   List[Address]     = []
         self.cluster_leader_addr: Address           = None
         
-        self.server_listener   : xmlrpc.server.SimpleXMLRPCServer = xmlrpc.server.SimpleXMLRPCServer((addr.ip, int(addr.port)))       
-        
         if contact_addr is None:
             self.cluster_addr_list.append(self.address)
             self.__initialize_as_leader()
@@ -46,20 +45,41 @@ class RaftNode():
         self.__print_log("Initialize as leader node...")
         self.cluster_leader_addr = self.address
         self.type                = RaftNode.NodeType.LEADER
+
+        self.election_term +=1
+
         request = {
-            "cluster_leader_addr": self.address
+            "cluster_leader_addr": self.address,
+            "election_term": self.election_term
         }
         
+        #Vote for self
+        approval_num = 1 #self approval 
+
+        #Send vote request to all nodes
         for address in self.cluster_addr_list:
+            if address == self.address:
+                continue
             # TODO : Send request to all node
-            pass
+            response = self.__send_request(request, "request_vote", address)
+
+            #TODO: gather response
         
+            if(response == "YES"):
+                approval_num+=1           
+        
+        if (approval_num > math.floor(len(self.cluster_addr_list)/2)):
+            pass #Election success
+        else:
+            return #Election fail: wait next term
+
         # TODO : Inform to all node this is new leader
         self.run_event = threading.Event()
         self.run_event.set()
         self.heartbeat_thread = threading.Thread(target=asyncio.run,args=[self.__leader_heartbeat(run_event=self.run_event)])
         self.heartbeat_thread.start()
         
+    #Stop Leader Heartbeat thread
     def stopThread(self):
         if(hasattr(self,"run_event")):
             self.run_event.clear()
@@ -165,35 +185,12 @@ class RaftNode():
         self.__print_log(f"Received heartbeat from {ip}:{port}")
         return "success"
     
-    async def send_message(self,address,message):
-        try:
-            print("makeclient")
-            ip=address.ip
-            port = address.port
-            client = xmlrpc.client.ServerProxy(f"http://{ip}:{port}")
-            print(f"send mesasage")
-            result = client.handle_message(message)
-            print(f"finish")
-            # result = await asyncio.to_thread(server.handle_message, message) #??????????
-            print(result)
-        except Exception as e:
-            print(f"Error sending message to {ip}:{port}: {e}")
-            
-            
+    def request_vote(self,req):
+        request = json.loads(req)
 
-        
-    
-    def handle_message(self,message):
-        return "Hello" + message
-    
-async def main():
-    print("start")
-    node1 = RaftNode(None, Address("localhost","12001"))
-    node2 = RaftNode(None, Address("localhost","12002"),Address("localhost","12001"))
-    node3 = RaftNode(None, Address("localhost","12003"),Address("localhost","12001"))
-    
-    await node1.send_message("Hello","localhost","12002")
-    # await node1.send_message("Hello","localhost","12003")
+        #If node has already voted this term
+        if(self.election_term == request["election_term"]):
+            return False
 
-if __name__ == "__main__":
-    asyncio.run(main())
+        self.election_term = request["election_term"]
+        return True
