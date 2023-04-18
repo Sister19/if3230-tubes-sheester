@@ -6,15 +6,16 @@ import math
 import json
 import time
 import xmlrpc.client 
+import aioxmlrpc.client 
 import xmlrpc.server 
 import asyncio
 import threading 
 import random
 
 class RaftNode():
-    HEARTBEAT_INTERVAL   = 1 #this interval hasnt been added with ~2s transmission time
-    ELECTION_TIMEOUT_MIN = 4
-    ELECTION_TIMEOUT_MAX = 10 
+    HEARTBEAT_INTERVAL   = 1 #this interval hasnt been added with transmission time
+    ELECTION_TIMEOUT_MIN = 2
+    ELECTION_TIMEOUT_MAX = 5 
     RPC_TIMEOUT          = 0.5 
 
     class NodeType(Enum):
@@ -54,32 +55,60 @@ class RaftNode():
             "election_term": self.election_term
         }
         
-        #Vote for self
-        approval_num = 1 #self approval 
+        if(len(self.cluster_addr_list) != 1 ): #check if there is only one node in cluster, if so, skip election
+            #Vote for self
+            approval_num = 1 #self approval 
 
-        #Send vote request to all nodes
-        for address in self.cluster_addr_list:
-            if address.ip  == self.address.ip and address.port == self.address.port:
-                continue
-            # TODO : Send request to all node non-blocking
-            response = self.__send_request(request, "request_vote", address)
-
-            #TODO: gather response
+            #Send vote request to all nodes
+            for address in self.cluster_addr_list:
+                if address.ip  == self.address.ip and address.port == self.address.port:
+                    continue
+                # TODO : Send request to all node non-blocking
+                response = self.__send_request(request, "request_vote", address)
+                
+                # try:
+                #     self.__print_log("Requesting Votes...")
+                #     tasks=[]
+                #     for address in self.cluster_addr_list:
+                #         if address != self.address:
+                #             task = asyncio.create_task(self.__send_request(request, "request_vote", address)))
+                #             tasks.append(task)
+                    
+                #     # await asyncio.gather(*tasks)
+                #     if(tasks):
+                #         done, _ = await asyncio.wait(tasks, timeout=1, return_when=asyncio.FIRST_COMPLETED)
+                #         for task in done:
+                #             try:
+                #                 result = await task
+                #                 if(result == False):
+                #                     self.__print_log(f"No response from {address}: {result}")
+                #                 # self.__print_log(f"Heartbeat response from {address}: {result}")
+                #             except Exception as e:
+                #                 print(f"Error occurred during heartbeat for {address}: {e}")
+            
+                
+                # except Exception as e:
+                #     print(f"Error occurred during heartbeat: {e}")
+                
+                #TODO: gather response
+            
+                if(response == "YES"):
+                    approval_num+=1           
+            
+            
+            
+            if (approval_num > math.floor(len(self.cluster_addr_list)/2)):
+                pass #Election success
+            else:
+                return #Election fail: wait next term
         
-            if(response == "YES"):
-                approval_num+=1           
-        
-        if (approval_num > math.floor(len(self.cluster_addr_list)/2)):
-            pass #Election success
-        else:
-            return #Election fail: wait next term
 
-        # TODO : Inform to all node this is new leader
+        self.__print_log("Succesfully initialized as leader node")
         self.run_event = threading.Event()
         self.run_event.set() 
         self.heartbeat_thread = threading.Thread(target=asyncio.run,args=[self.__leader_heartbeat(run_event=self.run_event)])
         self.heartbeat_thread.start() 
-        self.__print_log("Succesfully initialized as leader node")
+        
     
     def __try_to_apply_membership(self,contact_addr):
         
@@ -150,15 +179,15 @@ class RaftNode():
             print(f"Error sending message to {addr.ip}:{addr.port}: {e}")
             return "EXCEPTION"
     
-    async def __leader_heartbeat(self,run_event):
-        request = {
-            "log": self.log,
-            "election_term": self.election_term,
-            "cluster_addr_list": self.cluster_addr_list,
-            "cluster_leader_addr": self.address,
-        }
-                
+    async def __leader_heartbeat(self,run_event):                
         while run_event.is_set():
+            request = {
+                "log": self.log,
+                "election_term": self.election_term,
+                "cluster_addr_list": self.cluster_addr_list,
+                "cluster_leader_addr": self.address,
+            }
+            
             try:
                 self.__print_log("[Leader] Sending heartbeat...")
                 tasks=[]
@@ -169,7 +198,7 @@ class RaftNode():
                 
                 # await asyncio.gather(*tasks)
                 if(tasks):
-                    done, _ = await asyncio.wait(tasks, timeout=0.5, return_when=asyncio.FIRST_COMPLETED)
+                    done, _ = await asyncio.wait(tasks, timeout=1, return_when=asyncio.FIRST_COMPLETED)
                     for task in done:
                         try:
                             result = await task
@@ -187,9 +216,9 @@ class RaftNode():
       
     async def __send_heartbeat(self, request, addr):        
         try:
-            client = xmlrpc.client.ServerProxy(f"http://{addr.ip}:{addr.port}")
+            client = aioxmlrpc.client.ServerProxy(f"http://{addr.ip}:{addr.port}")
             # client._transport.timeout = RaftNode.RPC_TIMEOUT
-            result = client.heartbeat(json.dumps(request))
+            result = await client.heartbeat(json.dumps(request))
             return True
         except:
             return False
@@ -214,6 +243,7 @@ class RaftNode():
         self.cluster_leader_addr = Address(ip, port)
 
         self.__print_log(f"Received heartbeat from {ip}:{port}")
+        print(self.cluster_addr_list)
         return "success"
     
 
@@ -238,8 +268,7 @@ class RaftNode():
         if(hasattr(self,"run_event")):
             self.run_event.clear()
             self.heartbeat_thread.join()
-        if(hasattr(self,"timeout_timer")):
-            self.timeout_timer.cancel()       
+        self.__cancel_timeout()     
 
     def __election(self):
         #Start election

@@ -4,6 +4,7 @@ class PingServer:
     def ping(self):
         return "pong"
 
-with xmlrpc.server.SimpleXMLRPCServer(('localhost', 8000)) as server:
+print("Starting server on port 8001")
+with xmlrpc.server.SimpleXMLRPCServer(('localhost', 8001)) as server:
     server.register_instance(PingServer())
     server.serve_forever()
