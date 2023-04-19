@@ -80,7 +80,7 @@ class RaftNode():
                 #         for task in done:
                 #             try:
                 #                 result = await task
-                #                 if(result == False):
+                #                 if(result == "ack"):
                 #                     self.__print_log(f"No response from {address}: {result}")
                 #                 # self.__print_log(f"Heartbeat response from {address}: {result}")
                 #             except Exception as e:
@@ -92,17 +92,17 @@ class RaftNode():
                 
                 #TODO: gather response
             
-                if(response == "YES"):
+                if(response == True):
                     approval_num+=1           
             
-            
+
             
             if (approval_num > math.floor(len(self.cluster_addr_list)/2)):
                 pass #Election success
             else:
                 return #Election fail: wait next term
         
-
+        self.__cancel_timeout()
         self.__print_log("Succesfully initialized as leader node")
         self.run_event = threading.Event()
         self.run_event.set() 
@@ -124,21 +124,18 @@ class RaftNode():
         while response["status"] != "success":  #send response to leader
             redirected_addr = Address(response["address"]["ip"], response["address"]["port"])
             response        =  self.__send_request(self.address, "apply_membership", redirected_addr)
-            
-        self.log                 = response["log"]
         
-        for d in response["cluster_addr_list"]:   #turn json dicts back into address
-            address = Address(d["ip"], d["port"])
-            self.cluster_addr_list.append(address)
-            
-        self.cluster_leader_addr = redirected_addr
+        self.cluster_leader_addr    = redirected_addr
+        self.log                    = response["log"]
+        self.election_term          = response["election_term"]
+        self.cluster_addr_list      = self.address_dict_to_list(response["cluster_addr_list"])#turn json dicts back into address
+        
         self.__print_log("Succesfully applied membership to cluster with leader at " + str(self.cluster_leader_addr))
         
         self.__start_timeout()
         return      
     
     def apply_membership(self,request):
-        #BLOCKING
         if(self.type != RaftNode.NodeType.LEADER):      #TODO: CURRENTLY DOESNT HANDLE IF CANDIDATE
             response = {
             "status": "redirected",
@@ -156,8 +153,6 @@ class RaftNode():
                 print("Appending address to log")
                 self.cluster_addr_list.append(addr)
             
-            #TODO: send append entries to all nodes
-            
             response = {
                 "status": "success",
                 "log": self.log,
@@ -168,6 +163,7 @@ class RaftNode():
         return json.dumps(response)
  
     def __send_request(self, request: Any, rpc_name: str, addr: Address) -> "json":
+        #BLOCKING
         try:
             node         = xmlrpc.client.ServerProxy(f"http://{addr.ip}:{addr.port}")
             json_request = json.dumps(request)
@@ -232,10 +228,7 @@ class RaftNode():
         self.log = req["log"]
         self.election_term = req["election_term"]
         
-        self.cluster_addr_list = []
-        for d in req["cluster_addr_list"]:   #turn json dicts back into address
-            address = Address(d["ip"], d["port"])
-            self.cluster_addr_list.append(address)
+        self.cluster_addr_list = self.address_dict_to_list(req["cluster_addr_list"])   #turn json dicts back into address
         
         ip = req["cluster_leader_addr"]["ip"]
         port = req["cluster_leader_addr"]["port"]
@@ -243,7 +236,6 @@ class RaftNode():
         self.cluster_leader_addr = Address(ip, port)
 
         self.__print_log(f"Received heartbeat from {ip}:{port}")
-        print(self.cluster_addr_list)
         return "success"
     
 
@@ -254,9 +246,10 @@ class RaftNode():
         self.timeout_timer.start()
 
     def __cancel_timeout(self):
-        #stops timeout timer (call only when timeout has been started atleast once)
-        if self.timeout_timer.is_alive():
-            self.timeout_timer.cancel()
+        #stops timeout timer 
+        if(hasattr(self,"timeout_timer")):
+            if self.timeout_timer.is_alive():
+                self.timeout_timer.cancel()
             
     def __reset_timeout(self):
         #Reset election timeout timer
@@ -293,3 +286,10 @@ class RaftNode():
             if address == target_address:
                 return True
         return False
+
+    def address_dict_to_list(self,cluster_addr_list_dict):
+        cluster_addr_list = []
+        for d in cluster_addr_list_dict:   #turn json dicts back into address
+            address = Address(d["ip"], d["port"])
+            cluster_addr_list.append(address)
+        return cluster_addr_list
