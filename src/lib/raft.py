@@ -7,6 +7,7 @@ import json
 import time
 import xmlrpc.client 
 import aioxmlrpc.client 
+import aiohttp_xmlrpc.client
 import xmlrpc.server 
 import asyncio
 import threading 
@@ -14,8 +15,8 @@ import random
 
 class RaftNode():
     HEARTBEAT_INTERVAL   = 1 #this interval hasnt been added with transmission time
-    ELECTION_TIMEOUT_MIN = 2
-    ELECTION_TIMEOUT_MAX = 5 
+    ELECTION_TIMEOUT_MIN = 5
+    ELECTION_TIMEOUT_MAX = 10
     RPC_TIMEOUT          = 0.5 
 
     class NodeType(Enum):
@@ -35,23 +36,28 @@ class RaftNode():
         
         if contact_addr is None:
             self.cluster_addr_list.append(self.address)
-            self.__initialize_as_leader()
+            asyncio.run(self.__initialize_as_leader())
         else:
             self.__try_to_apply_membership(contact_addr)
             
     def __print_log(self, text: str):
         print(f"[{self.address}] [{time.strftime('%H:%M:%S')}] {text}")
         
-    def __initialize_as_leader(self):
+    async def __initialize_as_leader(self):
         self.__print_log("Try to Initialize as leader node...")
         self.cluster_leader_addr = self.address
 
-        self.type                = RaftNode.NodeType.LEADER
+        self.type                = RaftNode.NodeType.CANDIDATE
 
         self.election_term +=1
 
         request = {
-            "cluster_leader_addr": self.address,
+            "cluster_leader_addr":
+            {
+                "ip": self.cluster_leader_addr.ip,
+                "port": self.cluster_leader_addr.port
+            },
+
             "election_term": self.election_term
         }
         
@@ -60,54 +66,45 @@ class RaftNode():
             approval_num = 1 #self approval 
 
             #Send vote request to all nodes
-            for address in self.cluster_addr_list:
-                if address.ip  == self.address.ip and address.port == self.address.port:
-                    continue
-                # TODO : Send request to all node non-blocking
-                response = self.__send_request(request, "request_vote", address)
+            try:
+                self.__print_log("Requesting Votes...")
+                tasks=[]
+                for address in self.cluster_addr_list:
+                    if address != self.address:
+                        task = asyncio.create_task(self.__send_aio_request(request, "request_vote", address))
+                        tasks.append(task)
                 
-                # try:
-                #     self.__print_log("Requesting Votes...")
-                #     tasks=[]
-                #     for address in self.cluster_addr_list:
-                #         if address != self.address:
-                #             task = asyncio.create_task(self.__send_request(request, "request_vote", address)))
-                #             tasks.append(task)
-                    
-                #     # await asyncio.gather(*tasks)
-                #     if(tasks):
-                #         done, _ = await asyncio.wait(tasks, timeout=1, return_when=asyncio.FIRST_COMPLETED)
-                #         for task in done:
-                #             try:
-                #                 result = await task
-                #                 if(result == "ack"):
-                #                     self.__print_log(f"No response from {address}: {result}")
-                #                 # self.__print_log(f"Heartbeat response from {address}: {result}")
-                #             except Exception as e:
-                #                 print(f"Error occurred during heartbeat for {address}: {e}")
-            
-                
-                # except Exception as e:
-                #     print(f"Error occurred during heartbeat: {e}")
-                
-                #TODO: gather response
-            
-                if(response == True):
-                    approval_num+=1           
-            
-
-            
-            if (approval_num > math.floor(len(self.cluster_addr_list)/2)):
-                pass #Election success
-            else:
-                return #Election fail: wait next term
+                # await asyncio.gather(*tasks)
+                if(tasks):
+                    done, _ = await asyncio.wait(tasks,timeout = 5)
+                    for task in done:
+                        try:
+                            result = await task
+                            if(result["status"] == "ack"):
+                                approval_num+=1
+                                self.__print_log(f"Gained approval from {address}: {result}")
+                            # self.__print_log(f"Heartbeat response from {address}: {result}")
+                        except Exception as e:
+                            print(f"Error occurred for {address}")
         
+            
+            except Exception as e:
+                print(f"Error occurred during requesting vote: {e}")   
+            
+            if (approval_num <= math.floor(len(self.cluster_addr_list)/2)):
+                return #Election fail: wait next term
+            
+        
+        #Election success
+        self.type                = RaftNode.NodeType.LEADER
         self.__cancel_timeout()
         self.__print_log("Succesfully initialized as leader node")
         self.run_event = threading.Event()
         self.run_event.set() 
         self.heartbeat_thread = threading.Thread(target=asyncio.run,args=[self.__leader_heartbeat(run_event=self.run_event)])
         self.heartbeat_thread.start() 
+        
+        
         
     
     def __try_to_apply_membership(self,contact_addr):
@@ -150,7 +147,7 @@ class RaftNode():
             addr = Address(ip, port)
             
             if(self.is_address_in_list(addr,self.cluster_addr_list) == False):
-                print("Appending address to log")
+                self.__print_log("Appending address to log")
                 self.cluster_addr_list.append(addr)
             
             response = {
@@ -172,7 +169,7 @@ class RaftNode():
             self.__print_log(response)
             return response
         except Exception as e:
-            print(f"Error sending message to {addr.ip}:{addr.port}: {e}")
+            print(f"Error sending message to {addr.ip}:{addr.port}")
             return "EXCEPTION"
     
     async def __leader_heartbeat(self,run_event):                
@@ -187,37 +184,57 @@ class RaftNode():
             try:
                 self.__print_log("[Leader] Sending heartbeat...")
                 tasks=[]
+                address_list_copy = []
                 for address in self.cluster_addr_list:
                     if address != self.address:
-                        task = asyncio.create_task(self.__send_heartbeat(request,address))
+                        address_list_copy.append(address)
+                        task = asyncio.create_task(self.__send_aio_request(request,"heartbeat",address))
                         tasks.append(task)
                 
                 # await asyncio.gather(*tasks)
                 if(tasks):
-                    done, _ = await asyncio.wait(tasks, timeout=1, return_when=asyncio.FIRST_COMPLETED)
+                    done, _ = await asyncio.wait(tasks,timeout = 3)
                     for task in done:
                         try:
                             result = await task
-                            if(result == False):
-                                self.__print_log(f"No response from {address}: {result}")
-                            # self.__print_log(f"Heartbeat response from {address}: {result}")
+                            try:
+                                if(result["status"]== "success"):
+                                    ip = result["address"]["ip"]
+                                    port = result["address"]["port"]
+                                    address_list_copy.remove(Address(ip,port))
+                            except:
+                                pass
                         except Exception as e:
-                            print(f"Error occurred during heartbeat for {address}: {e}")
-            
+                            print(f"Error occurred during heartbeat: {e}")
                 
+
+                for address in address_list_copy:
+                    self.__print_log(f"No Response from {address}")
+
+
             except Exception as e:
                 print(f"Error occurred during heartbeat: {e}")
         
             await asyncio.sleep(self.HEARTBEAT_INTERVAL)
       
-    async def __send_heartbeat(self, request, addr):        
+    async def __send_aio_request(self, request: Any, rpc_name: str, addr: Address):        
+        #NON BLOCKING
         try:
-            client = aioxmlrpc.client.ServerProxy(f"http://{addr.ip}:{addr.port}")
+            node = aiohttp_xmlrpc.client.ServerProxy(f"http://{addr.ip}:{addr.port}") #this library doesnt have timeouts?
             # client._transport.timeout = RaftNode.RPC_TIMEOUT
-            result = await client.heartbeat(json.dumps(request))
-            return True
-        except:
-            return False
+
+            json_request = json.dumps(request)
+            rpc_function = getattr(node, rpc_name)
+            response     =  json.loads(await rpc_function(json_request))
+            # self.__print_log(response)
+            await node.close()
+            return response
+        
+        except Exception as e:
+            await node.close()
+            # print("Exception:", e)
+
+            return "error"
         # return json.loads(result)
         
     def heartbeat(self,request):
@@ -236,7 +253,15 @@ class RaftNode():
         self.cluster_leader_addr = Address(ip, port)
 
         self.__print_log(f"Received heartbeat from {ip}:{port}")
-        return "success"
+
+        response = {
+            "status":"success",
+            "address":  {
+                "ip": self.address.ip,
+                "port": self.address.port
+            }
+            }
+        return json.dumps(response)
     
 
     def __start_timeout(self):
@@ -267,19 +292,27 @@ class RaftNode():
         #Start election
         self.__print_log("Election Timer Timed out.")
         self.__start_timeout()
-        self.__initialize_as_leader()
+        asyncio.run(self.__initialize_as_leader())
     
     def request_vote(self,req):
         request = json.loads(req)
 
+        election_term = request["election_term"]
+
         #If node has already voted this term
-        if(self.election_term == request["election_term"]):
-            return False
-        
-        #if node hasnt voted, vote and reset timeout
-        self.__reset_timeout()
-        self.election_term = request["election_term"]
-        return True
+        if(self.election_term >= election_term):
+            response = {"status":"noack"}
+        else:
+            ip = request["cluster_leader_addr"]["ip"]
+            port = request["cluster_leader_addr"]["port"]
+
+            #if node hasnt voted, vote and reset timeout
+            self.__print_log(f"Voted for {ip}:{port} in election term {election_term}")
+            self.__reset_timeout()
+            
+            self.election_term = request["election_term"]
+            response = {"status":"ack"}
+        return json.dumps(response)
        
     def is_address_in_list(self,target_address,address_list):
         for address in address_list:
