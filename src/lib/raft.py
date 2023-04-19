@@ -28,7 +28,9 @@ class RaftNode():
         # socket.setdefaulttimeout(RaftNode.RPC_TIMEOUT)
         self.address:             Address           = addr
         self.type:                RaftNode.NodeType = RaftNode.NodeType.FOLLOWER
-        self.log:                 List[str, str]    = []
+        self.log                                    = [] #type -> list of dicts
+        self.todo_log                               = None  
+        self.to_commit                              = None      
         self.app:                 Any               = application
         self.election_term:       int               = 0
         self.cluster_addr_list:   List[Address]     = []
@@ -174,8 +176,27 @@ class RaftNode():
     
     async def __leader_heartbeat(self,run_event):                
         while run_event.is_set():
+            if self.todo_log:
+                if(self.todo_log["status"] == "UNCOMMITTED"):
+                    send_log = self.todo_log
+
+                    if(self.to_commit == None):
+                        self.add_uncommited_entry_to_log(self.todo_log)
+                        self.to_commit = "PENDING"
+
+                    # self.__print_log("[Leader] Sending uncommited log...
+                if(self.to_commit == "APPROVED"):
+                    self.todo_log["status"] = "COMMITTED"
+                    self.commit_entry(self.todo_log)
+                    send_log = self.todo_log
+                    self.todo_log = None      #THIS PART IS SCUFFED AF, BUT AM TOO TIRED TO UNSCUFF IT
+                    self.to_commit = None
+                print(self.log)
+            else:
+                send_log = ""
+
             request = {
-                "log": self.log,
+                "log": send_log,
                 "election_term": self.election_term,
                 "cluster_addr_list": self.cluster_addr_list,
                 "cluster_leader_addr": self.address,
@@ -185,6 +206,9 @@ class RaftNode():
                 self.__print_log("[Leader] Sending heartbeat...")
                 tasks=[]
                 address_list_copy = []
+
+                approval_num = 1 #self approval
+
                 for address in self.cluster_addr_list:
                     if address != self.address:
                         address_list_copy.append(address)
@@ -199,6 +223,7 @@ class RaftNode():
                             result = await task
                             try:
                                 if(result["status"]== "success"):
+                                    approval_num+=1
                                     ip = result["address"]["ip"]
                                     port = result["address"]["port"]
                                     address_list_copy.remove(Address(ip,port))
@@ -211,7 +236,16 @@ class RaftNode():
                 for address in address_list_copy:
                     self.__print_log(f"No Response from {address}")
 
-
+                if (approval_num > math.floor(len(self.cluster_addr_list)/2)):
+                    print(self.to_commit)
+                    if(self.to_commit == "PENDING"):
+                        print("gay")
+                        self.to_commit = "APPROVED"
+                    # if(self.todo_log):
+                    #     self.todo_log["status"] = "COMMITTED"
+                    #     self.__print_log("[Leader] Committing log...")
+                    # commit success
+            
             except Exception as e:
                 print(f"Error occurred during heartbeat: {e}")
         
@@ -242,7 +276,19 @@ class RaftNode():
         
         req = json.loads(request)
         
-        self.log = req["log"]
+        # if(self.election_term < req["election_term"]): #THIS IS NOT NEEDED in this tubes yey
+        #     self.type = RaftNode.NodeType.FOLLOWER
+        #     #stop heartbeat thread
+
+        logchanges = req["log"]
+        if(logchanges):
+            if(logchanges["status"] == "UNCOMMITTED"):
+                print("break\n\n\n\n")
+                self.add_uncommited_entry_to_log(logchanges)
+            elif(logchanges["status"] == "COMMITTED"):
+                self.commit_entry(logchanges)
+
+
         self.election_term = req["election_term"]
         
         self.cluster_addr_list = self.address_dict_to_list(req["cluster_addr_list"])   #turn json dicts back into address
@@ -314,6 +360,64 @@ class RaftNode():
             response = {"status":"ack"}
         return json.dumps(response)
        
+    def execute(self,req):
+        if(self.type == RaftNode.NodeType.FOLLOWER): #doesnt handle if candidate
+            response = {
+                "status": "redirected",
+                "address": {
+                    "ip": self.cluster_leader_addr.ip,
+                    "port": self.cluster_leader_addr.port
+                }
+            }
+            return response
+
+        request = json.loads(req)
+
+        action = request["action"]
+        if(action == "queue"):
+            message = request["message"]
+            log = {
+                "action": "queue",
+                "message": message,
+                "status": "UNCOMMITTED"
+            }
+
+        elif(action == "dequeue"):
+            log = {
+                "action": "dequeue",
+                "message": "",
+                "status": "UNCOMMITTED"
+            }
+
+        self.todo_log = log
+
+        return {"status":"success"}
+        
+    def add_uncommited_entry_to_log(self,entry):
+        if entry["action"] == "queue":
+            print_message = "queue " + str(entry["message"])
+        else:
+            print_message = "dequeue"
+
+        self.log.append(entry)
+        self.__print_log(f"Appended Uncommited log: {print_message}")
+    
+    def commit_entry(self,entry):
+        if entry["action"] == "queue":
+            print_message = "queue " + str(entry["message"])
+        else:
+            print_message = "dequeue"
+
+        #remove last entry in log
+        self.log.pop()
+        #replace with the commited version
+        self.log.append(entry)
+        #dosomething with the message
+        self.__print_log(f"Committed log: {print_message}")
+        
+    def request_log(self):
+        return json.dumps(self.log)
+
     def is_address_in_list(self,target_address,address_list):
         for address in address_list:
             if address == target_address:
@@ -326,3 +430,6 @@ class RaftNode():
             address = Address(d["ip"], d["port"])
             cluster_addr_list.append(address)
         return cluster_addr_list
+    
+    def ping(self):
+        return "pong"
