@@ -16,7 +16,7 @@ import random
 class RaftNode():
     HEARTBEAT_INTERVAL   = 1 #this interval hasnt been added with transmission time
     ELECTION_TIMEOUT_MIN = 5
-    ELECTION_TIMEOUT_MAX = 10
+    ELECTION_TIMEOUT_MAX = 14
     RPC_TIMEOUT          = 0.5 
 
     class NodeType(Enum):
@@ -78,7 +78,7 @@ class RaftNode():
                 
                 # await asyncio.gather(*tasks)
                 if(tasks):
-                    done, _ = await asyncio.wait(tasks,timeout = 5)
+                    done, _ = await asyncio.wait(tasks,timeout = 3)
                     for task in done:
                         try:
                             result = await task
@@ -131,6 +131,16 @@ class RaftNode():
         
         self.__print_log("Succesfully applied membership to cluster with leader at " + str(self.cluster_leader_addr))
         
+        for log in self.log:
+            if(log["status"] == "UNCOMMITTED"):
+                break
+            
+            if(log["action"] == "queue"):
+                self.app.enqueue(log["message"])
+            else:
+                self.app.dequeue()
+
+
         self.__start_timeout()
         return      
     
@@ -191,7 +201,7 @@ class RaftNode():
                     send_log = self.todo_log
                     self.todo_log = None      #THIS PART IS SCUFFED AF, BUT AM TOO TIRED TO UNSCUFF IT
                     self.to_commit = None
-                print(self.log)
+                # print(self.log)
             else:
                 send_log = ""
 
@@ -237,9 +247,7 @@ class RaftNode():
                     self.__print_log(f"No Response from {address}")
 
                 if (approval_num > math.floor(len(self.cluster_addr_list)/2)):
-                    print(self.to_commit)
                     if(self.to_commit == "PENDING"):
-                        print("gay")
                         self.to_commit = "APPROVED"
                     # if(self.todo_log):
                     #     self.todo_log["status"] = "COMMITTED"
@@ -272,7 +280,7 @@ class RaftNode():
         # return json.loads(result)
         
     def heartbeat(self,request):
-        self.__reset_timeout()
+        
         
         req = json.loads(request)
         
@@ -280,16 +288,33 @@ class RaftNode():
         #     self.type = RaftNode.NodeType.FOLLOWER
         #     #stop heartbeat thread
 
+        #check if election term received is lower than current term
+        if(self.election_term > req["election_term"]):
+            return
+
+        #check if election term received is higher than current term
+        if(self.election_term < req["election_term"]):
+            self.election_term = req["election_term"]
+            self.type = RaftNode.NodeType.FOLLOWER
+            self.stopThread()
+
+        
+
+        self.__reset_timeout()
         logchanges = req["log"]
         if(logchanges):
             if(logchanges["status"] == "UNCOMMITTED"):
-                print("break\n\n\n\n")
                 self.add_uncommited_entry_to_log(logchanges)
             elif(logchanges["status"] == "COMMITTED"):
                 self.commit_entry(logchanges)
 
+                if(logchanges["action"] == "queue"):
+                    self.app.enqueue(logchanges["message"])
+                else:
+                    self.app.dequeue()
 
-        self.election_term = req["election_term"]
+
+
         
         self.cluster_addr_list = self.address_dict_to_list(req["cluster_addr_list"])   #turn json dicts back into address
         
@@ -388,10 +413,27 @@ class RaftNode():
                 "message": "",
                 "status": "UNCOMMITTED"
             }
+        else:
+            return {"status":"wrong action"}
 
         self.todo_log = log
 
-        return {"status":"success"}
+
+        #wait until self.to_commit is "APPROVED"
+        count = 0
+        while(self.to_commit != "APPROVED"):    #THIS IS TRASH CODE, BUT IT WOKRS
+            count+=1
+            if(count > 20):
+                #THERE IS NO HANDLING TO REMOVE FROM LOGS BUT ITS NOT NEEDED IN THIS TUBES LMAO
+                return {"status":"error"}
+            time.sleep(0.5)
+        
+        if(action == "queue"):
+            self.app.enqueue(message)
+            return {"status":"success"}
+        else: #(action == "dequeue"):
+            message = self.app.dequeue()
+            return {"status":"success", "message": message}
         
     def add_uncommited_entry_to_log(self,entry):
         if entry["action"] == "queue":

@@ -1,5 +1,6 @@
 from lib.struct.address       import Address
 from lib.raft          import RaftNode
+from lib.app import Application
 from xmlrpc.server import SimpleXMLRPCServer
 # from app           import MessageQueue
 import sys
@@ -10,7 +11,9 @@ def start_serving(addr: Address, contact_node_addr: Address):
         server.register_introspection_functions()
         # server.register_instance(RaftNode(MessageQueue(), addr, contact_node_addr))
         
-        node = RaftNode("", addr, contact_node_addr)
+        app = Application()
+
+        node = RaftNode(app, addr, contact_node_addr)
         server.register_instance(node)
         
         try:

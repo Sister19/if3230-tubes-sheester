@@ -14,7 +14,8 @@ def send_to_server(request):
 
     global server
     response = (server.execute(req))
-    while response["status"] != "success":
+    while response["status"] == "redirected":
+        print(response)
         server = xmlrpc.client.ServerProxy(f'http://{response["address"]["ip"]}:{response["address"]["port"]}')
         response = (server.execute(req))
         
