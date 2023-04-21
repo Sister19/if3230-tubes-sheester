@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>My Flask App</title>
+  </head>
+  <!-- <body>
+    <h1>Data</h1>
+    <div id="data"></div>
+    <ul>
+      {% for item in data %}
+        <h2>Node: </h2>
+        <li>
+          <p>Status: {{ item['status'] }}</p>
+          {% if 'address' in item %}
+            <p>Address: {{ item['address']['ip'] }}:{{ item['address']['port'] }}</p>
+          {% endif %}
+          {% if 'type' in item %}
+            <p>Type: {{ item['type'] }}</p>
+          {% endif %}
+          {% if 'election_term' in item %}
+            <p>Election Term: {{ item['election_term'] }}</p>
+          {% endif %}
+          {% if 'log' in item %}
+            <p>Log:</p>
+            <ul>
+              {% for log_item in item['log'] %}
+                <li>{{ log_item['action'] }}: {{ log_item['message']}}: {{ log_item['status'] }} </li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+    <script>
+      setInterval(function() {
+        location.reload();
+      }, 5000); // reload every 1 second
+    </script>
+  </body> -->
+  <body>
+    <h1>Nodes Data:</h1>
+    <table>
+      <thead>
+        <tr>
+          <th>Status</th>
+          <th>Address</th>
+          <th>Type</th>
+          <th>Election Term</th>
+          <th>Log</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for node in data %}
+        <tr>
+          <td>{{ node['status'] }}</td>
+          {% if 'address' in node %}
+          <td>{{ node['address']['ip'] }}:{{ node['address']['port'] }}</td>
+          {% endif %}
+          {% if 'type' in node %}
+          <td>{{ node['type'] }}</td>
+          {% endif %}
+          {% if 'election_term' in node %}
+          <td>{{ node['election_term'] }}</td>
+          {% endif %}
+          {% if 'log' in node %}
+          <td>{{ node['log'] }}</td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <script>
+      setInterval(function() {
+        location.reload();
+      }, 10000); // reload every 1 second
+    </script>
+  </body>
+</html>
