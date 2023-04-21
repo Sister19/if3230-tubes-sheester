@@ -78,7 +78,7 @@ class RaftNode():
                 
                 # await asyncio.gather(*tasks)
                 if(tasks):
-                    done, _ = await asyncio.wait(tasks,timeout = 3)
+                    done, _ = await asyncio.wait(tasks,timeout = 4)
                     for task in done:
                         try:
                             result = await task
@@ -227,7 +227,7 @@ class RaftNode():
                 
                 # await asyncio.gather(*tasks)
                 if(tasks):
-                    done, _ = await asyncio.wait(tasks,timeout = 3)
+                    done, _ = await asyncio.wait(tasks,timeout = 4)
                     for task in done:
                         try:
                             result = await task
