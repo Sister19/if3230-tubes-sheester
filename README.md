@@ -4,7 +4,7 @@
 ## Daftar Isi
 * [Informasi Umum](#informasi-umum)
 * [Teknologi yang Dipakai](#teknologi-yang-dipakai)
-* [Fitur](#fitur)
+* [Library Eksternal yang Digunakan](#library-eksternal-yang-digunakan)
 * [Penggunaan](#penggunaan)
 * [Status Proyek](#status-proyek)
 * [Kontak](#kontak)
@@ -29,12 +29,17 @@ Kami membuat sebuah program dengan bahasa pemrograman Python dalam rangka membua
 
 ## Penggunaan
 1. Start Server:
->py server.py <ip> <port> <opt: contact ip> <opt: contact port>
+> run py server.py <ip> <port> <opt: contact ip> <opt: contact port>
 
 2. Start Client
->py client.py <contact ip> <contact port>
+> run py client.py <contact ip> <contact port>
 
 3. Start Dashboard
+>1. go to src directory
+>2. run py dashboard.py 
+>3. open webapp given
+
+**Untuk melakukan connect ke localhost 12000 dilakukan dengan melakukan hardcode**
 
 ## Status Proyek
 _Proyek Selesai_
