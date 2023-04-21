@@ -458,7 +458,31 @@ class RaftNode():
         self.__print_log(f"Committed log: {print_message}")
         
     def request_log(self):
+        if(self.type == RaftNode.NodeType.FOLLOWER): #doesnt handle if candidate
+            response = {
+                "status": "redirected",
+                "address": {
+                    "ip": self.cluster_leader_addr.ip,
+                    "port": self.cluster_leader_addr.port
+                }
+            }
+            return response
         return json.dumps(self.log)
+    
+    def get_dashboard_data(self):
+        response = {
+            "status": "success",
+            "address": {
+                "ip": self.address.ip,
+                "port": self.address.port
+            },
+            "type": self.type.value,
+            "election_term": self.election_term,
+            "log": self.log,
+        }
+        if(self.type == RaftNode.NodeType.LEADER):
+            response["cluster_addr_list"] = self.cluster_addr_list
+        return json.dumps(response)
 
     def is_address_in_list(self,target_address,address_list):
         for address in address_list:
