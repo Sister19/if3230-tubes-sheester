@@ -14,8 +14,8 @@ import random
 
 class RaftNode():
     HEARTBEAT_INTERVAL   = 1 #this interval hasnt been added with transmission time
-    ELECTION_TIMEOUT_MIN = 10
-    ELECTION_TIMEOUT_MAX = 25
+    ELECTION_TIMEOUT_MIN = 20
+    ELECTION_TIMEOUT_MAX = 40
     RPC_TIMEOUT          = 0.5 
 
     class NodeType(Enum):
@@ -77,7 +77,7 @@ class RaftNode():
                 
                 # await asyncio.gather(*tasks)
                 if(tasks):
-                    done, _ = await asyncio.wait(tasks,timeout = 8)
+                    done, _ = await asyncio.wait(tasks,timeout = 15)
                     for task in done:
                         try:
                             result = await task
@@ -226,7 +226,7 @@ class RaftNode():
                 
                 # await asyncio.gather(*tasks)
                 if(tasks):
-                    done, _ = await asyncio.wait(tasks,timeout = 8)
+                    done, _ = await asyncio.wait(tasks,timeout = 15)
                     for task in done:
                         try:
                             result = await task
