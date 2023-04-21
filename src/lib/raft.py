@@ -422,7 +422,7 @@ class RaftNode():
         count = 0
         while(self.to_commit != "APPROVED"):    #THIS IS TRASH CODE, BUT IT WOKRS
             count+=1
-            if(count > 20):
+            if(count > 40):
                 #THERE IS NO HANDLING TO REMOVE FROM LOGS BUT ITS NOT NEEDED IN THIS TUBES LMAO
                 return {"status":"error"}
             time.sleep(0.5)
